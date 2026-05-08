@@ -8,6 +8,12 @@ const path = require("path");
 const cliJsonPath = "./cli.json";
 const checksumsKtPath = "plugin/src/main/kotlin/org/jetbrains/qodana/Checksums.kt";
 
+function validateVersion(version) {
+    if (!/^\d+(\.\d+)*$/.test(version)) {
+        throw new Error(`Security Error: Invalid version format "${version}"`);
+    }
+}
+
 const PLATFORMS = ["windows", "linux", "darwin"];
 const ARCHS = ["x86_64", "arm64"];
 
@@ -79,13 +85,23 @@ async function getLatestRelease() {
         };
 
         const release = await makeRequest(options);
-        return release.tag_name.substring(1);
+       const tag = release.tag_name;
+
+        if (!/^v\d+(\.\d+)*$/.test(tag)) {
+            throw new Error(`Security Error: Unexpected tag format from GitHub: ${tag}`);
+        }
+
+        return tag.substring(1);
     } catch (error) {
         console.error("An error occurred:", error);
+        throw error; 
     }
 }
 
 function updateCliChecksums(latestVersion, checksumsPath, cliJsonPath) {
+    
+    validateVersion(latestVersion);
+    
     const cliJson = JSON.parse(fs.readFileSync(cliJsonPath, "utf-8"));
     const allowedKeysfromCliJson = ["windows_x86_64", "windows_arm64", "linux_x86_64", "linux_arm64", "darwin_x86_64", "darwin_arm64"];
     const checksums = fs.readFileSync(checksumsPath, "utf-8");
@@ -105,6 +121,12 @@ function updateCliChecksums(latestVersion, checksumsPath, cliJsonPath) {
 }
 
 function updateCircleCIChecksums(circleCIConfigPath) {
+    
+    const resolvedPath = path.resolve(__dirname, circleCIConfigPath);
+    if (!resolvedPath.startsWith(path.resolve(__dirname, ".."))) {
+        throw new Error("Security Error: Invalid CircleCI config path");
+    }
+    
     let circleCIConfig = fs.readFileSync(circleCIConfigPath, "utf-8");
     execSync("curl -fSsL https://github.com/jetbrains/qodana-cli/releases/latest/download/qodana_linux_x86_64.tar.gz -o qodana_linux_x86_64.tar.gz");
     execSync("mkdir qodana && tar -xzf qodana_linux_x86_64.tar.gz -C qodana");
@@ -117,7 +139,13 @@ function updateCircleCIChecksums(circleCIConfigPath) {
 }
 
 function updateChecksumsKtFile(checksums, latestVersion) {
+   
+   validateVersion(latestVersion);
+
     const filepath = path.resolve(__dirname, `../${checksumsKtPath}`);
+    
+    const projectRoot = path.resolve(__dirname, "..");
+    
     if (fs.existsSync(filepath)) {
         console.log(`Checksums.kt file exists at ${filepath}`);
     } else {
@@ -153,6 +181,10 @@ function updateChecksumsKtFile(checksums, latestVersion) {
 }
 
 function updateVersions(latestVersion, currentVersion) {
+    
+    validateVersion(latestVersion);
+    validateVersion(currentVersion);
+    
     const latestVersions = latestVersion.split(".");
     const latestMajor = parseInt(latestVersions[0]);
     const latestMinor = parseInt(latestVersions[1]);
@@ -182,6 +214,10 @@ function updateVersions(latestVersion, currentVersion) {
 }
 
 function replaceStringsInProject(newString, oldString) {
+    
+    validateVersion(newString);
+    validateVersion(oldString);
+
     process.env.LC_ALL = "C";
     const isMacOS = process.platform === "darwin";
     const command = `cd .. && find . -type f -not -path "./${checksumsKtPath}" -exec sed -i${isMacOS ? " ''" : ""} 's/${oldString}/${newString}/g' {} +`;
